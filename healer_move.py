@@ -1,1 +1,2 @@
-
+class HealerMove(object):
+    pass

@@ -1,24 +1,26 @@
 import battlecode as bc
 import random
+import math
 import sys
 import traceback
-from communication import *
-from factory_production import *
-from healer_attack import *
-from healer_move import *
-from knight_attack import *
-from knight_move import *
-from mage_attack import *
-from mage_move import *
+import mage_move
+# from communication import *
+# import factory_production
+# from healer_attack import *
+# from healer_move import *
+# from knight_attack import *
+# from knight_move import *
+# from mage_attack import *
+# from mage_move import *
 from map_type import *
-from ranger_attack import *
-from ranger_move import *
-from research import *
-from rocket_launch import *
-from worker_build import WorkerBuild
-from worker_harvest import *
-from worker_move import *
-from worker_replicate import *
+# from ranger_attack import *
+# from ranger_move import *
+# from research import *
+# from rocket_launch import *
+import worker_build
+# from worker_harvest import *
+# from worker_move import *
+# from worker_replicate import *
 
 print("pystarting2")
 
@@ -34,18 +36,72 @@ print("pystarted")
 # aside from turns taking slightly different amounts of time due to noise.
 random.seed(6137)
 
-# let's start off with some research!
-# we can queue as much as we want.
-gc.queue_research(bc.UnitType.Rocket)
-gc.queue_research(bc.UnitType.Worker)
-gc.queue_research(bc.UnitType.Knight)
-
 my_team = gc.team()
+building = False
+num_of_factory_blueprints = 0
+#/////////////////////Definitions//////////////////////////////////////////////////////////////////
+
+
+def factory_count(in_progress):
+    ft = in_progress  #factory total
+    for units in gc.my_units():
+        if units.unit_type == 5:
+            ft += 1
+    return ft
+
+
+def military_count():  # kt = knight_total, rt = ranger_total, mt = mage_total, ht = healer_total
+    kt = 0
+    rt = 0
+    mt = 0
+    ht = 0
+    for units in gc.my_units():
+        if units.unit_type == bc.UnitType.Factory and units.is_factory_producing() == True:  # knight = 1, ranger = 2, mage = 3, healer = 4
+            if units.factory_unit_type() == bc.UnitType.Knight:
+                kt += 1
+            elif units.factory_unit_type() == bc.UnitType.Ranger:
+                rt += 1
+            elif units.factory_unit_type() == bc.UnitType.Mage:
+                mt += 1
+            elif units.factory_unit_type() == bc.UnitType.Healer:
+                ht += 1
+        elif units.unit_type == bc.UnitType.Knight:
+            kt += 1
+        elif units.unit_type == bc.UnitType.Ranger:
+            rt += 1
+        elif units.unit_type == bc.UnitType.Mage:
+            mt += 1
+        elif units.unit_type == bc.UnitType.Healer:
+            ht += 1
+    return [kt, rt, mt, ht]
+
+
+def ratio():
+    military_total_count = sum(military_count()) + 1  # we add 1 because we want to increase military by 1
+    # here are the ratios
+    ratio_k = .2
+    # ratio_r = .6
+    ratio_m = .1
+    ratio_h = .1
+    # using some math we get the number of units planned, kp = knight planned, mp = mage planned, ...
+    kp = math.floor(ratio_k * military_total_count)
+    mp = math.floor(ratio_m * military_total_count)
+    hp = math.floor(ratio_h * military_total_count)
+    rp = military_total_count - sum([kp, mp, hp])  # the rest of the planned units should be rangers
+    return [kp, rp, mp, hp]
+
+
+
+
 
 while True:
     # We only support Python 3, which means brackets around print()
-    print('pyround:', gc.round())
 
+    if gc.round() % 10 == 0:
+        print('pyround:', gc.round())
+        # print('factories being built:', num_of_factory_blueprints)
+        # print('factory count:', factory_count(num_of_factory_blueprints))
+    num_of_factory_blueprints = 0
     # frequent try/catches are a good idea
     try:
         # walk through our units:
@@ -53,26 +109,93 @@ while True:
             # test if import works
             try:
                 if unit.unit_type == bc.UnitType.Worker:
-                    tout = WorkerBuild(unit,unit.location,unit.health)
-                    print(tout.status_check())
+                    # wm = WorkerMove(unit,unit.location,unit.health)
+                    wb = worker_build.WorkerBuild(unit,unit.location,unit.health)
+                    # wh = WorkerHarvest(unit)
+                    # print(wb.status_check())
             except Exception as e:
                 print('Error:', e)
-              # use this to show where the error was
+                # use this to show where the error was
                 traceback.print_exc()
 
-            # first, factory logic
-            if unit.unit_type == bc.UnitType.Factory:
-                garrison = unit.structure_garrison()
-                if len(garrison) > 0:
-                    d = random.choice(directions)
-                    if gc.can_unload(unit.id, d):
-                        print('unloaded a knight!')
-                        gc.unload(unit.id, d)
-                        continue
-                elif gc.can_produce_robot(unit.id, bc.UnitType.Knight):
-                    gc.produce_robot(unit.id, bc.UnitType.Knight)
-                    print('produced a knight!')
-                    continue
+            try:
+                if unit.unit_type == bc.UnitType.Factory:
+                    # fp = factory_production.FactoryProduction(unit,unit.location, unit.health)
+                    # print(fp.military_count())
+                    # print(fp.status_check())
+                    # print(military_count())
+                    # print(ratio())
+                    garrison = unit.structure_garrison()
+                    if len(garrison) > 0:
+                        d = random.choice(directions)
+                        if gc.can_unload(unit.id, d):
+                            # print('unloaded a unit!')
+                            gc.unload(unit.id, d)
+                    elif gc.can_produce_robot(unit.id, bc.UnitType.Ranger) and military_count()[1] < ratio()[1]:  #ranger = 1, ...
+                        gc.produce_robot(unit.id, bc.UnitType.Ranger)
+                        # print('produced a ranger!')
+
+                    elif gc.can_produce_robot(unit.id, bc.UnitType.Knight) and military_count()[0] < ratio()[0]:  #knight = 0, ...
+                        gc.produce_robot(unit.id, bc.UnitType.Knight)
+                        # print('produced a knight!')
+
+                    elif gc.can_produce_robot(unit.id, bc.UnitType.Mage) and military_count()[2] < ratio()[2]:  #mage = 2, ...
+                        gc.produce_robot(unit.id, bc.UnitType.Mage)
+                        # print('produced a mage!')
+
+                    elif gc.can_produce_robot(unit.id, bc.UnitType.Ranger) and military_count()[3] < ratio()[3]:  #healer = 3
+                        gc.produce_robot(unit.id, bc.UnitType.Ranger)
+                        # print('produced a healer!')
+
+
+            except Exception as e:
+                print('Error:', e)
+                traceback.print_exc()
+
+            try:
+                if unit.unit_type == bc.UnitType.Rocket:
+                    pass
+                    # rl = RocketLaunch(unit, unit.location, unit.health)
+            except Exception as e:
+                print('Error:', e)
+                traceback.print_exc()
+
+            try:
+                if unit.unit_type == bc.UnitType.Ranger:
+                    pass
+                    # rr = RangerRetreat(unit, unit.location, unit.health)
+                    # ra = RangerAttack(unit)
+            except Exception as e:
+                print('Error:', e)
+                traceback.print_exc()
+
+            try:
+                if unit.unit_type == bc.UnitType.Knight:
+                    pass
+                    # kr = KnightRetreat(unit, unit.location, unit.health)
+                    # ka = KnightAttack(unit)
+            except Exception as e:
+                print('Error:', e)
+                traceback.print_exc()
+
+            try:
+                if unit.unit_type == bc.UnitType.Mage:
+                    pass
+                    # mr = MageRetreat(unit, unit.location, unit.health)
+                    # ma = MageAttack(unit)
+            except Exception as e:
+                print('Error:', e)
+                traceback.print_exc()
+
+            try:
+                if unit.unit_type == bc.UnitType.Healer:
+                    pass
+                    # hr= HealerRetreat(unit, unit.location, unit.health)
+                    # hf = HealerForward(unit)
+            except Exception as e:
+                print('Error:', e)
+                # use this to show where the error was
+                traceback.print_exc()
 
             # first, let's look for nearby blueprints to work on
             location = unit.location
@@ -81,11 +204,14 @@ while True:
                 for other in nearby:
                     if unit.unit_type == bc.UnitType.Worker and gc.can_build(unit.id, other.id):
                         gc.build(unit.id, other.id)
-                        print('built a factory!')
+                        builder = unit.id
+                        build_location = other.location
+                        # print('building a factory!')
+                        building = True
                         # move onto the next unit
                         continue
                     if other.team != my_team and gc.is_attack_ready(unit.id) and gc.can_attack(unit.id, other.id):
-                        print('attacked a thing!')
+                        # print('attacked a thing!')
                         gc.attack(unit.id, other.id)
                         continue
 
@@ -94,12 +220,15 @@ while True:
             d = random.choice(directions)
 
             # or, try to build a factory:
-            if gc.karbonite() >= bc.UnitType.Factory.blueprint_cost() and gc.can_blueprint(unit.id, bc.UnitType.Factory, d):
+            if gc.karbonite() >= bc.UnitType.Factory.blueprint_cost() and gc.can_blueprint(unit.id, bc.UnitType.Factory, d) and factory_count(num_of_factory_blueprints) < 5:
                 gc.blueprint(unit.id, bc.UnitType.Factory, d)
+                # print("building a new factory")
+                num_of_factory_blueprints += 1
+                # print("%d" % num_of_factory_blueprints)
             # and if that fails, try to move
-            elif gc.is_move_ready(unit.id) and gc.can_move(unit.id, d):
+            elif gc.is_move_ready(unit.id) and gc.can_move(unit.id, d) and building == False:
                 gc.move_robot(unit.id, d)
-
+        building = False
     except Exception as e:
         print('Error:', e)
         # use this to show where the error was

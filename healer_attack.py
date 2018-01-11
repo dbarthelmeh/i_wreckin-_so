@@ -1,1 +1,2 @@
-
+class HealerAttack(object):
+    pass

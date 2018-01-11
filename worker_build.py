@@ -1,4 +1,4 @@
-class WorkerBuild(object):
+class WorkerBuild:
     def __init__(self, who, where, health):
         self.who = who
         self.where = where

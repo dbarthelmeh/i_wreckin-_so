@@ -1,1 +1,2 @@
-
+class RangerAttack(object):
+    pass
