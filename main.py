@@ -24,11 +24,29 @@ import worker_build
 
 print("pystarting2")
 
+
 # A GameController is the main type that you talk to the game with.
 # Its constructor will connect to a running game.
 gc = bc.GameController()
 directions = list(bc.Direction)
 
+gc.queue_research(bc.UnitType.Worker)
+gc.queue_research(bc.UnitType.Ranger)
+gc.queue_research(bc.UnitType.Rocket)
+
+mars_x_destinations = []
+mars_y_destinations = []
+k=0
+for x_coord in range(gc.starting_map(bc.Planet.Mars).width):
+    for y_coord in range(gc.starting_map(bc.Planet.Mars).height):
+        if gc.starting_map(bc.Planet.Mars).is_passable_terrain_at(bc.MapLocation(bc.Planet.Mars,x_coord,y_coord)):  # bc.MapLocation(bc.Planet.Mars,x_coord,y_coord)):
+            mars_x_destinations.append(x_coord)
+            mars_y_destinations.append(y_coord)
+            k += 1
+            if k == 0:
+                print("Mars has no open spots")
+print(mars_x_destinations)
+print(mars_y_destinations)
 print("pystarted")
 
 # It's a good idea to try to keep your bots deterministic, to make debugging easier.
@@ -39,6 +57,7 @@ random.seed(6137)
 my_team = gc.team()
 building = False
 num_of_factory_blueprints = 0
+num_of_rocket_blueprints = 0
 #/////////////////////Definitions//////////////////////////////////////////////////////////////////
 
 
@@ -48,6 +67,14 @@ def factory_count(in_progress):
         if units.unit_type == 5:
             ft += 1
     return ft
+
+
+def rocket_count(in_progress):
+    rt = in_progress  #factory total
+    for units in gc.my_units():
+        if units.unit_type == bc.UnitType.Rocket:
+            rt += 1
+    return rt
 
 
 def military_count():  # kt = knight_total, rt = ranger_total, mt = mage_total, ht = healer_total
@@ -97,11 +124,13 @@ def ratio():
 while True:
     # We only support Python 3, which means brackets around print()
 
-    if gc.round() % 10 == 0:
+    if gc.round() % 50 == 0:
         print('pyround:', gc.round())
+        print(gc.karbonite())
         # print('factories being built:', num_of_factory_blueprints)
         # print('factory count:', factory_count(num_of_factory_blueprints))
     num_of_factory_blueprints = 0
+    num_of_rocket_blueprints = 0
     # frequent try/catches are a good idea
     try:
         # walk through our units:
@@ -118,7 +147,7 @@ while True:
                 # use this to show where the error was
                 traceback.print_exc()
 
-            try:
+            try: # produce units from a factory
                 if unit.unit_type == bc.UnitType.Factory:
                     # fp = factory_production.FactoryProduction(unit,unit.location, unit.health)
                     # print(fp.military_count())
@@ -146,6 +175,20 @@ while True:
                     elif gc.can_produce_robot(unit.id, bc.UnitType.Ranger) and military_count()[3] < ratio()[3]:  #healer = 3
                         gc.produce_robot(unit.id, bc.UnitType.Ranger)
                         # print('produced a healer!')
+                # let's launch a rocket
+                if unit.unit_type == bc.UnitType.Rocket:
+                    garrison = unit.structure_garrison()
+                    x_roll = random.choice(mars_x_destinations)
+                    y_roll = random.choice(mars_y_destinations)
+                    if len(garrison) > 7 and gc.can_launch_rocket(unit.id,bc.MapLocation(bc.Planet.Mars,x_roll,y_roll)):
+                        gc.launch_rocket(bc.Planet.Mars,x_roll,y_roll)
+                        continue
+
+                # if unit.unit_type == bc.UnitType.Rocket and unit.GameMap.map_mars
+                #     d =random.choice(directions)
+                #    if gc.can_unload(unit.id,d):
+                #       gc.unload(unit.id,d)
+                #        continue
 
 
             except Exception as e:
@@ -225,7 +268,12 @@ while True:
                 # print("building a new factory")
                 num_of_factory_blueprints += 1
                 # print("%d" % num_of_factory_blueprints)
+            # let's build a rocket
+            elif gc.karbonite() >= bc.UnitType.Rocket.blueprint_cost() and gc.can_blueprint(unit.id, bc.UnitType.Rocket,d) and rocket_count(num_of_rocket_blueprints) < 5:
+                gc.blueprint(unit.id, bc.UnitType.Rocket, d)
+                num_of_rocket_blueprints += 1
             # and if that fails, try to move
+
             elif gc.is_move_ready(unit.id) and gc.can_move(unit.id, d) and building == False:
                 gc.move_robot(unit.id, d)
         building = False
