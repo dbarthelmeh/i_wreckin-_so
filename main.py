@@ -12,7 +12,7 @@ import mage_move
 # from knight_move import *
 # from mage_attack import *
 # from mage_move import *
-from map_type import *
+# from map_type import *
 # from ranger_attack import *
 # from ranger_move import *
 # from research import *
@@ -45,8 +45,20 @@ for x_coord in range(gc.starting_map(bc.Planet.Mars).width):
             k += 1
             if k == 0:
                 print("Mars has no open spots")
-print(mars_x_destinations)
-print(mars_y_destinations)
+print("Mars has %d landing spots:" % k)
+
+# Find all deposits on earth
+deposit_locations_earth = []
+for x_coord in range(gc.starting_map(bc.Planet.Earth).width):
+    for y_coord in range(gc.starting_map(bc.Planet.Earth).height):
+        if gc.starting_map(bc.Planet.Earth).initial_karbonite_at(bc.MapLocation(bc.Planet.Earth,x_coord,y_coord)) > 0:
+            deposit_locations_earth.append([x_coord,y_coord])
+
+# sum of total resources
+total_earth_deposit = 0
+for i in deposit_locations_earth:
+        total_earth_deposit += gc.starting_map(bc.Planet.Earth).initial_karbonite_at(bc.MapLocation(bc.Planet.Earth,i[0],i[1]))
+print("total earth deposit is:", total_earth_deposit)
 print("pystarted")
 
 # It's a good idea to try to keep your bots deterministic, to make debugging easier.
@@ -58,7 +70,7 @@ my_team = gc.team()
 building = False
 num_of_factory_blueprints = 0
 num_of_rocket_blueprints = 0
-#/////////////////////Definitions//////////////////////////////////////////////////////////////////
+# /////////////////////Definitions//////////////////////////////////////////////////////////////////
 
 
 def factory_count(in_progress):
@@ -117,6 +129,41 @@ def ratio():
     rp = military_total_count - sum([kp, mp, hp])  # the rest of the planned units should be rangers
     return [kp, rp, mp, hp]
 
+def is_robot(unit):
+    if unit.unit_type != bc.UnitType.Factory and unit.unit_type != bc.UnitType.Rocket:
+        return True
+    else:
+        return False
+
+
+# friendly military units center
+def center_of_friendlies():
+    x = []
+    y = []
+    for unit in gc.my_units():
+        if is_robot(unit):
+            x.append(unit.location.map_location()[1])
+            y.append(unit.location.map_location()[2])
+    x_ave = sum(x)/len(x)
+    y_ave = sum(y)/len(y)
+    return [x_ave, y_ave]
+
+
+def center_of_uglies():
+    x = []
+    y = []
+    enemies_sensed = []
+    for unit in gc.my_units():
+        for sensed_units in gc.sense_nearby_units(unit.location.map_location(), 100):
+            if sensed_units.team != my_team and sensed_units not in enemies_sensed:
+                enemies_sensed.append(sensed_units)
+    for unit in enemies_sensed:
+        x.append(unit.location.map_location()[1])
+        y.append(unit.location.map_location()[2])
+    x_ave = sum(x)/len(x)
+    y_ave = sum(y)/len(y)
+    return [x_ave, y_ave]
+
 
 
 
@@ -126,7 +173,7 @@ while True:
 
     if gc.round() % 50 == 0:
         print('pyround:', gc.round())
-        print(gc.karbonite())
+        print('current karbonite:', gc.karbonite())
         # print('factories being built:', num_of_factory_blueprints)
         # print('factory count:', factory_count(num_of_factory_blueprints))
     num_of_factory_blueprints = 0
@@ -253,10 +300,13 @@ while True:
                         building = True
                         # move onto the next unit
                         continue
-                    if other.team != my_team and gc.is_attack_ready(unit.id) and gc.can_attack(unit.id, other.id):
-                        # print('attacked a thing!')
-                        gc.attack(unit.id, other.id)
-                        continue
+                if unit.unit_type != bc.UnitType.Factory and unit.unit_type != bc.UnitType.Rocket:
+                    in_attack_range = gc.sense_nearby_units(location.map_location(),unit.attack_range())
+                    for other in in_attack_range:
+                        if other.team != my_team and gc.is_attack_ready(unit.id) and gc.can_attack(unit.id, other.id):
+                            # print('attacked a thing!')
+                            gc.attack(unit.id, other.id)
+                            continue
 
             # okay, there weren't any dudes around
             # pick a random direction:
