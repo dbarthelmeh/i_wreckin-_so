@@ -58,6 +58,7 @@ attacking = False
 one_worker_loaded = False
 first_rocket = True
 rocket_locations = []
+known_asteroid_locations = []
 num_of_factory_blueprints = 0
 num_of_rocket_blueprints = 0
 bug_init = {}
@@ -232,17 +233,17 @@ def workers_total():
 
 # harvest definitions
 def can_harvest_adjacent(unit6):
-    for di in list(bc.Direction):
+    for di in bc.Direction:
         if gc.can_harvest(unit6.id, di):
             return True
-        else:
-            return False
+    else:
+        return False
 
 
 def harvest_adjacent(unit7):
-    for d1 in directions:
+    for d1 in bc.Direction:
         if gc.can_harvest(unit7.id, d1):
-            gc.harvest(unit7.id, d1)
+            return d1
 
 
 # friendly military units center
@@ -303,12 +304,18 @@ while True:
         if gc.round() % 10 == 0:
             cf = center_of_friendlies()
         if gc.round() % 5 == 0:
-            for k_lode in deposit_locations_earth:
-                if gc.can_sense_location(k_lode):
-                    if gc.karbonite_at(k_lode) == 0:
-                        deposit_locations_earth.remove(k_lode)
-            nk = nearest_karbonite_to_friendlies(deposit_locations_earth)
-            rocket_locations = []
+            if gc.planet() == bc.Planet.Earth:
+                for k_lode in deposit_locations_earth:
+                    if gc.can_sense_location(k_lode):
+                        if gc.karbonite_at(k_lode) == 0:
+                            deposit_locations_earth.remove(k_lode)
+                nk = nearest_karbonite_to_friendlies(deposit_locations_earth)
+            else:
+                for k_lode in known_asteroid_locations:
+                    if gc.can_sense_location(k_lode):
+                        if gc.karbonite_at(k_lode) == 0:
+                            known_asteroid_locations.remove(k_lode)
+                nk = nearest_karbonite_to_friendlies(known_asteroid_locations)
             for unit in gc.my_units():
                 if unit.unit_type == bc.UnitType.Rocket:
                     if len(unit.structure_garrison()) < 8 and unit.structure_is_built():
@@ -319,6 +326,9 @@ while True:
                     if unit.unit_type == bc.UnitType.Worker:
                         gc.write_team_array(0, 1)
                         break
+        if gc.planet() == bc.Planet.Mars:
+            if gc.asteroid_pattern().has_asteroid(gc.round()):
+                known_asteroid_locations.append(gc.asteroid_pattern().asteroid(gc.round()).location)
 
         num_of_factory_blueprints = 0
         num_of_rocket_blueprints = 0
@@ -368,6 +378,8 @@ while True:
                         if gc.round() > 748:
                             if gc.can_launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll)):
                                 gc.launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll))
+                                if unit.location.map_location() in rocket_locations:
+                                    rocket_locations.remove(unit.location.map_location())
 
                     if unit.unit_type == bc.UnitType.Rocket and unit.location.is_on_planet(bc.Planet.Mars):
                         for d in directions:
@@ -410,7 +422,7 @@ while True:
                                     gc.load(unit.id, other.id)
 
                     if unit.unit_type == bc.UnitType.Worker and can_harvest_adjacent(unit):
-                        harvest_adjacent(unit)
+                        gc.harvest(unit.id, harvest_adjacent(unit))
                         building = True  # so that worker doesn't move away from harvest
                         continue
 
@@ -431,12 +443,13 @@ while True:
                     # okay, there weren't any dudes around
                     # pick a random direction:
                     d = random.choice(directions)
-                    if gc.round() < 600 or gc.planet() == bc.Planet.Mars:
+                    if len(rocket_locations) < 1 or location.map_location().distance_squared_to(nr) > 12 or \
+                            gc.planet() == bc.Planet.Mars:
                         dir_to = location.map_location().direction_to(cu)
                         dir_away = location.map_location().direction_to(cf)
                     else:
                         dir_to = location.map_location().direction_to(nr)
-                        dir_away = dir_to
+                        dir_away = location.map_location().direction_to(nr)
                     dir_to_karbonite = location.map_location().direction_to(nk)
 
                     # or, try to build a factory:
