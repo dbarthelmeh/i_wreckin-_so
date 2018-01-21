@@ -3,30 +3,10 @@ import random
 import math
 import sys
 import traceback
-import mage_move
-# from communication import *
-# import factory_production
-# from healer_attack import *
-# from healer_move import *
-# from knight_attack import *
-# from knight_move import *
-# from mage_attack import *
-# from mage_move import *
-# from map_type import *
-# from ranger_attack import *
-# from ranger_move import *
-# from research import *
-# from rocket_launch import *
-import worker_build
-# from worker_harvest import *
-# from worker_move import *
-# from worker_replicate import *
 
-# A GameController is the main type that you talk to the game with.
-# Its constructor will connect to a running game.
 gc = bc.GameController()
 directions = list(bc.Direction)
-del directions[8] # removes the direction: center
+del directions[8]  # removes the direction: center
 
 gc.queue_research(bc.UnitType.Rocket)
 gc.queue_research(bc.UnitType.Worker)
@@ -43,11 +23,10 @@ gc.queue_research(bc.UnitType.Ranger)
 
 mars_x_destinations = []
 mars_y_destinations = []
-k=0
+k = 0
 for x_coord in range(gc.starting_map(bc.Planet.Mars).width):
     for y_coord in range(gc.starting_map(bc.Planet.Mars).height):
-        if gc.starting_map(bc.Planet.Mars).is_passable_terrain_at(bc.MapLocation(bc.Planet.Mars,x_coord,y_coord)):
-            # bc.MapLocation(bc.Planet.Mars,x_coord,y_coord)):
+        if gc.starting_map(bc.Planet.Mars).is_passable_terrain_at(bc.MapLocation(bc.Planet.Mars, x_coord, y_coord)):
             mars_x_destinations.append(x_coord)
             mars_y_destinations.append(y_coord)
             k += 1
@@ -59,14 +38,13 @@ print("Mars has %d landing spots:" % k)
 deposit_locations_earth = []
 for x_coord in range(gc.starting_map(bc.Planet.Earth).width):
     for y_coord in range(gc.starting_map(bc.Planet.Earth).height):
-        if gc.starting_map(bc.Planet.Earth).initial_karbonite_at(bc.MapLocation(bc.Planet.Earth,x_coord,y_coord)) > 0:
-            deposit_locations_earth.append([x_coord,y_coord])
+        if gc.starting_map(bc.Planet.Earth).initial_karbonite_at(bc.MapLocation(bc.Planet.Earth, x_coord, y_coord)) > 0:
+            deposit_locations_earth.append(bc.MapLocation(bc.Planet.Earth, x_coord, y_coord))
 
 # sum of total resources
 total_earth_deposit = 0
 for i in deposit_locations_earth:
-        total_earth_deposit += gc.starting_map(bc.Planet.Earth).initial_karbonite_at(bc.MapLocation(
-            bc.Planet.Earth,i[0],i[1]))
+        total_earth_deposit += gc.starting_map(bc.Planet.Earth).initial_karbonite_at(i)
 print("total earth deposit is:", total_earth_deposit)
 
 # It's a good idea to try to keep your bots deterministic, to make debugging easier.
@@ -76,24 +54,38 @@ random.seed(6137)
 
 my_team = gc.team()
 building = False
+attacking = False
+one_worker_loaded = False
+first_rocket = True
+rocket_locations = []
 num_of_factory_blueprints = 0
 num_of_rocket_blueprints = 0
-bug_move_dic = {}
 bug_init = {}
-cu = bc.MapLocation(gc.planet(), int(gc.starting_map(gc.planet()).width / 2), int(gc.starting_map(gc.planet()).height / 2))
+cu = bc.MapLocation(
+    gc.planet(), int(gc.starting_map(gc.planet()).width / 2), int(gc.starting_map(gc.planet()).height / 2))
 # /////////////////////Definitions//////////////////////////////////////////////////////////////////
 
 
 def factory_count(in_progress):
-    ft = in_progress  #factory total
+    ft = in_progress  # factory total
     for units in gc.my_units():
         if units.unit_type == 5:
             ft += 1
     return ft
 
 
+def adjacent_impassable_terrain(loc):
+    result = 0
+    for m in directions:
+        if not gc.starting_map(gc.planet()).on_map(loc.add(m)):
+            result += 1
+        elif not gc.starting_map(gc.planet()).is_passable_terrain_at(loc.add(m)):
+            result += 1
+    return result
+
+
 def rocket_count(in_progress):
-    rt = in_progress  #factory total
+    rt = in_progress  # rocket total
     for units in gc.my_units():
         if units.unit_type == bc.UnitType.Rocket:
             rt += 1
@@ -106,7 +98,7 @@ def military_count():  # kt = knight_total, rt = ranger_total, mt = mage_total, 
     mt = 0
     ht = 0
     for units in gc.my_units():
-        if units.unit_type == bc.UnitType.Factory and units.is_factory_producing() == True:
+        if units.unit_type == bc.UnitType.Factory and units.is_factory_producing():
             # knight = 1, ranger = 2, mage = 3, healer = 4
             if units.factory_unit_type() == bc.UnitType.Knight:
                 kt += 1
@@ -152,12 +144,13 @@ def is_robot(unt):
 # some movement things
 def general_direction(dir):  # dir is one of the integers: 0, 1, ..., 7
     # this returns a list of directions that will be somewhat closer to the target
-    result = directions[:]  #clones our directions
-    for i in range(3):
-        if dir - 3 > -1:  # either subtracts or adds 3 from dir making sure that the difference or sum is a valid index
-            del result[dir - 3]
+    result = directions[:]
+    der = dir.value
+    for i1 in range(3):
+        if der - 3 > -1:  # either subtracts or adds 3 from dir making sure that the difference or sum is a valid index
+            del result[der - 3]
         else:
-            del result[dir + 3]
+            del result[der + 3]
     return result
 
 
@@ -172,43 +165,22 @@ def can_move_any(un, list):
         return False
 
 
-def move_robot_any(unit, list):
+def move_robot_any(unit4, list):
     for dir in list:
-        if gc.is_move_ready(unit.id) and gc.can_move(unit.id, dir):
-            gc.move_robot(unit.id, dir)
+        if gc.is_move_ready(unit4.id) and gc.can_move(unit4.id, dir):
+            gc.move_robot(unit4.id, dir)
 
 
-def bug_over_list(location_new, target_dir):  # a list of Locations() on the other side of obstructions
-    result = []
-    northern = [directions[0], directions[1], directions[7]]
-    southern = [directions[3], directions[4], directions[5]]
-    east = directions[2]
-    west_and_center = [directions[6], bc.Direction.Center]
-    if target_dir in northern:  # North, NE, NW
-        for m in range(3):
-            if gc.starting_map(gc.planet()).on_map(bc.MapLocation(
-                    gc.planet(), location_new.map_location().x - 1 + m, location_new.map_location().y + 2)):  # if target columns are on the map
-                for j in range(5):
-                    result.append(bc.MapLocation(gc.planet(), location_new.map_location().x - 1 + m, location_new.map_location().y - 2 + j))
-    elif target_dir in southern:  # SE, S, SW
-        for m in range(3):
-            if gc.starting_map(gc.planet()).on_map(bc.MapLocation(
-                    gc.planet(), location_new.map_location().x - 1 + m, location_new.map_location().y - 2)):  # if target columns are on the map
-                for j in range(5):
-                    result.append(bc.MapLocation(gc.planet(), location_new.map_location().x - 1 + m, location_new.map_location().y - 2 - j))
-    elif target_dir == east:  # E
-        for m in range(3):
-            if gc.starting_map(gc.planet()).on_map(bc.MapLocation(
-                    gc.planet(), location_new.map_location().x + 2, location_new.map_location().y - 1 + m)):  # if target rows are on the map
-                for j in range(5):
-                    result.append(bc.MapLocation(gc.planet(), location_new.map_location().x + 2 + j, location_new.map_location().y - 1 + m))
-    elif target_dir in west_and_center:  # W, center
-        for m in range(3):
-            if gc.starting_map(gc.planet()).on_map(bc.MapLocation(
-                    gc.planet(), location_new.map_location().x - 2, location_new.map_location().y - 1 + m)):  # if target rows are on the map
-                for j in range(5):
-                    result.append(bc.MapLocation(gc.planet(), location_new.map_location().x - 2 - j, location_new.map_location().y - 1 + m))
-    return result
+def nearest_karbonite_to_friendlies(list):
+    loc = cf
+    shortest = 5000
+    nearest_loc = cf
+    for item in list:
+        test_distance = loc.distance_squared_to(item)
+        if test_distance < shortest:
+            shortest = test_distance
+            nearest_loc = item
+    return nearest_loc
 
 
 def util_bug_map(rob):
@@ -217,7 +189,7 @@ def util_bug_map(rob):
     if der == 8:
         der = 0
     resulting_der = bc.Direction.Center
-    for l in range(0,8):
+    for l in range(0, 8):
         if gc.can_move(rob.id, directions[der]):
             if not gc.has_unit_at_location(rob.location.map_location().add(directions[der])):
                 resulting_der = directions[der]
@@ -233,67 +205,10 @@ def util_bug_map(rob):
     return resulting_der
 
 
-'''def buildings_in_the_way(unit):  # makes a move that goes around obstructions
-    dirs = list(bc.Direction)
-    i = 0
-    j = 0
-    k = 0
-    safe_dir = True  # check that direction is on map
-    nearby_factories = gc.sense_nearby_units_by_type(unit.location.map_location(), 2, bc.UnitType.Factory)
-    nearby_rockets = gc.sense_nearby_units_by_type(unit.location.map_location(), 2, bc.UnitType.Rocket)
-    nearby_buildings = []
-    for items in nearby_factories:
-        nearby_buildings.append(items)
-    for items in nearby_rockets:
-        nearby_buildings.append(items)
-    if len(nearby_buildings) > 0:
-        is_nearby_buildings = True
-    else:
-        buildings_in_the_way = False
-    while safe_dir and i < 7:
-        if gc.starting_map(gc.planet()).on_map(unit.location.map_location().add(dirs[i])):
-            while not gc.can_move(unit.id, dirs[i]) and not gc.is_occupiable(unit.location.map_location().add(dirs[i]))\
-                   or buildings_in_the_way and j < 9:
-                j += 1  # if j == 9 then we have checked all directions and we're trapped in a box
-                while buildings_in_the_way and k < 9:
-                    if gc.starting_map(gc.planet()).on_map(unit.location.map_location().add(dirs[i])):
-                        for items in nearby_buildings:  # checks for buildings in the way
-                            if unit.location.map_location().add(dirs[i]) == items.location.map_location():
-                                if i < 7:
-                                    i += 1
-                                else:
-                                    i = 0
-                                k += 1
-                                break
-                        else:  # if no buildings in the way then run this
-                            buildings_in_the_way = False
-                            break
-                    else:  # if direction is not on map
-                        if i < 7:
-                            i += 1
-                        else:
-                            i = 0
-                else:  # if k == 9 then we are surrounded by buildings
-                    return dirs[8]
-                if i < 7:  # check for can move and is occupiable
-                    i += 1
-                else:
-                    i = 0
-        else:
-            if i < 7:
-                i += 1
-            else:
-                i = 0
-    if gc.can_move(unit.id, dirs[i]) and not gc.is_occupiable(unit.location.map_location().add(dirs[i])):
-        return dirs[i]
-    else:
-        return dirs[8]'''
-
-
-def can_replicate_any(unit):
+def can_replicate_any(unit5):
     result = []
     for dir in directions:
-        if gc.can_replicate(unit.id,dir):
+        if gc.can_replicate(unit5.id, dir):
             result.append(dir)
     if len(result) > 0:
         return True
@@ -301,10 +216,10 @@ def can_replicate_any(unit):
         return False
 
 
-def replicate_any(unit):
+def replicate_any(unit3):
     for dir in directions:
-        if gc.can_replicate(unit.id, dir):
-            gc.replicate(unit.id,dir)
+        if gc.can_replicate(unit3.id, dir):
+            gc.replicate(unit3.id, dir)
 
 
 def workers_total():
@@ -316,52 +231,55 @@ def workers_total():
 
 
 # harvest definitions
-def can_harvest_adjacent(unit):
-    for d in directions:
-        if gc.can_harvest(unit.id,d):
+def can_harvest_adjacent(unit6):
+    for di in list(bc.Direction):
+        if gc.can_harvest(unit6.id, di):
             return True
         else:
             return False
 
 
-def harvest_adjacent(unit):
-    for d in directions:
-        if gc.can_harvest(unit.id,d):
-            gc.harvest(unit.id,d)
+def harvest_adjacent(unit7):
+    for d1 in directions:
+        if gc.can_harvest(unit7.id, d1):
+            gc.harvest(unit7.id, d1)
 
 
 # friendly military units center
 def center_of_friendlies():
-    x_coords = []
-    y_coords = []
-    for unit in gc.my_units():
-        if unit.location.is_on_map() and is_robot(unit):
-            instantiate_loc = unit.location.map_location()
-            x_coords.append(instantiate_loc.x)
-            y_coords.append(instantiate_loc.y)
-    if len(x_coords) > 0 and len(y_coords) > 0:
-        x_ave = int(sum(x_coords)/len(x_coords))
-        y_ave = int(sum(y_coords)/len(y_coords))
+    x_coordinates = []
+    y_coordinates = []
+    for unit2 in gc.my_units():
+        if unit2.location.is_on_map() and is_robot(unit2):
+            instantiate_loc = unit2.location.map_location()
+            x_coordinates.append(instantiate_loc.x)
+            y_coordinates.append(instantiate_loc.y)
+    if len(x_coordinates) > 0 and len(y_coordinates) > 0:
+        x_ave = int(sum(x_coordinates) / len(x_coordinates))
+        y_ave = int(sum(y_coordinates) / len(y_coordinates))
         return bc.MapLocation(gc.planet(), x_ave, y_ave)
     else:
-        return bc.MapLocation(gc.planet(), int(gc.starting_map(gc.planet()).width / 2), int(gc.starting_map(gc.planet()).height / 2))
+        return bc.MapLocation(
+            gc.planet(), int(gc.starting_map(gc.planet()).width / 2), int(gc.starting_map(gc.planet()).height / 2))
 
 
 cf = center_of_friendlies()
+nk = cf.clone()
+nr = cf.clone()
 
 
 def center_of_uglies():
     x_coordinates = []
     y_coordinates = []
     enemies_sensed = []
-    for unit in gc.my_units():
-        if unit.location.is_on_map():
-            for sensed_units in gc.sense_nearby_units(unit.location.map_location(), 100):
+    for unit1 in gc.my_units():
+        if unit1.location.is_on_map():
+            for sensed_units in gc.sense_nearby_units(unit1.location.map_location(), 100):
                 if sensed_units.team != my_team and sensed_units not in enemies_sensed:
                     enemies_sensed.append(sensed_units)
-    for unit in enemies_sensed:
-        if unit.location.is_on_map():
-            instantiate_loc = unit.location.map_location()
+    for unit1 in enemies_sensed:
+        if unit1.location.is_on_map():
+            instantiate_loc = unit1.location.map_location()
             x_coordinates.append(instantiate_loc.x)
             y_coordinates.append(instantiate_loc.y)
     if len(x_coordinates) > 0 and len(y_coordinates) > 0:
@@ -369,309 +287,267 @@ def center_of_uglies():
         y_ave = int(sum(y_coordinates)/len(y_coordinates))
         return bc.MapLocation(gc.planet(), x_ave, y_ave)
     else:
-        return bc.MapLocation(gc.planet(), gc.starting_map(gc.planet()).width - cf.x, gc.starting_map(gc.planet()).height - cf.y)
+        return bc.MapLocation(gc.planet(), gc.starting_map(
+            gc.planet()).width - cf.x, gc.starting_map(gc.planet()).height - cf.y)
 
 
 while True:
-
-    if gc.round() % 50 == 0:
-        print('pyround:', gc.round())
-        print('current karbonite:', gc.karbonite())
-        print('time left:', gc.get_time_left_ms())
-        cu = center_of_uglies()
-        cf = center_of_friendlies()
-        print('center of friendlies:', cu)
-        print('center of uglies:', cf)
-        # print(bug_init)
-        # print(bug_move_dic)
-
-    # if gc.round() == 125:
-        # current1 = bc.ResearchInfo().get_level(bc.UnitType.Rocket)
-        # current2 = bc.ResearchInfo().get_level(bc.UnitType.Ranger)
-        # current3 = bc.ResearchInfo().get_level(bc.UnitType.Healer)
-        # current4 = bc.ResearchInfo().get_level(bc.UnitType.Mage)
-        # current5 = bc.ResearchInfo().get_level(bc.UnitType.Worker)
-        # current6 = bc.ResearchInfo().get_level(bc.UnitType.Knight)
-        # print('Current rocket research level is:', current1)
-        # print('Current ranger research level is:', current2)
-        # print('Current healer research level is:', current3)
-        # print('Current mage research level is:', current4)
-        # print('Current worker research level is:', current5)
-        # print('Current knight research level is:', current6)
-        # print('factories being built:', num_of_factory_blueprints)
-        # print('factory count:', factory_count(num_of_factory_blueprints))
-    num_of_factory_blueprints = 0
-    num_of_rocket_blueprints = 0
-    try:
-        # walk through our units:
-        for unit in gc.my_units():
-            # test if import works
-            # try:
-                # if unit.unit_type == bc.UnitType.Worker:
-                    # wm = WorkerMove(unit,unit.location,unit.health)
-                    # wb = worker_build.WorkerBuild(unit,unit.location,unit.health)
-                    # wh = WorkerHarvest(unit)
-                    # print(wb.status_check())
-            # except Exception as e:
-                # print('Error:', e)
-                # use this to show where the error was
-                # traceback.print_exc()
-
-            try:  # produce units from a factory
-                if unit.unit_type == bc.UnitType.Factory:
-                    # fp = factory_production.FactoryProduction(unit,unit.location, unit.health)
-                    # print(fp.military_count())
-                    # print(fp.status_check())
-                    # print(military_count())
-                    # print(ratio())
-                    garrison = unit.structure_garrison()
-                    # if
-                    if len(garrison) > 0:
-                        d = random.choice(directions)
-                        if gc.can_unload(unit.id, d):
-                            # print('unloaded a unit!')
-                            gc.unload(unit.id, d)
-                    elif gc.can_produce_robot(unit.id, bc.UnitType.Ranger) and military_count()[1] < ratio()[1]:
-                        # ranger = 1, ...
-                        gc.produce_robot(unit.id, bc.UnitType.Ranger)
-                        # print('produced a ranger!')
-
-                    elif gc.can_produce_robot(unit.id, bc.UnitType.Knight) and military_count()[0] < ratio()[0]:
-                        # knight = 0, ...
-                        gc.produce_robot(unit.id, bc.UnitType.Knight)
-                        # print('produced a knight!')
-
-                    elif gc.can_produce_robot(unit.id, bc.UnitType.Mage) and military_count()[2] < ratio()[2]:
-                        # mage = 2, ...
-                        gc.produce_robot(unit.id, bc.UnitType.Mage)
-                        # print('produced a mage!')
-
-                    elif gc.can_produce_robot(unit.id, bc.UnitType.Healer) and military_count()[3] < ratio()[3]:
-                        # healer = 3
-                        gc.produce_robot(unit.id, bc.UnitType.Healer)
-                        # print('produced a healer!')
-                # let's launch a rocket
+    if gc.get_time_left_ms() > 500:
+        if gc.round() % 50 == 0:
+            print('pyround:', gc.round())
+            print('current karbonite:', gc.karbonite())
+            print('time left:', gc.get_time_left_ms())
+            cu = center_of_uglies()
+            print('center of friendlies:', cu)
+            print('center of uglies:', cf)
+        if gc.round() % 10 == 0:
+            cf = center_of_friendlies()
+        if gc.round() % 5 == 0:
+            for k_lode in deposit_locations_earth:
+                if gc.can_sense_location(k_lode):
+                    if gc.karbonite_at(k_lode) == 0:
+                        deposit_locations_earth.remove(k_lode)
+            nk = nearest_karbonite_to_friendlies(deposit_locations_earth)
+            rocket_locations = []
+            for unit in gc.my_units():
                 if unit.unit_type == bc.UnitType.Rocket:
-                    garrison = unit.structure_garrison()
-                    x_roll = random.choice(mars_x_destinations)
-                    y_roll = random.choice(mars_y_destinations)
-                    if len(garrison) > 0 and gc.can_launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll)):
-                        gc.launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll))
-                        print("launched rocket!")
+                    if len(unit.structure_garrison()) < 8 and unit.structure_is_built():
+                        rocket_locations.append(unit.location.map_location())
+            nr = nearest_karbonite_to_friendlies(rocket_locations)
+            if gc.planet() == bc.Planet.Mars:
+                for unit in gc.my_units():
+                    if unit.unit_type == bc.UnitType.Worker:
+                        gc.write_team_array(0, 1)
+                        break
+
+        num_of_factory_blueprints = 0
+        num_of_rocket_blueprints = 0
+        wom = gc.get_team_array(bc.Planet.Mars)[0]
+        try:
+            # walk through our units:
+            for unit in gc.my_units():
+
+                try:  # produce units from a factory
+                    if unit.unit_type == bc.UnitType.Factory:
+                        garrison = unit.structure_garrison()
+                        if len(gc.my_units()) < 65:
+                            i = 0
+                            while len(garrison) > 0 and i < 2:
+                                for d in directions:
+                                    if gc.can_unload(unit.id, d):
+                                        gc.unload(unit.id, d)
+                                i += 1
+                        if gc.can_produce_robot(unit.id, bc.UnitType.Worker) and workers_total() < 1:
+                            gc.produce_robot(unit.id, bc.UnitType.Worker)
+                        elif gc.can_produce_robot(unit.id, bc.UnitType.Ranger) and military_count()[1] < ratio()[1]:
+                            # ranger = 1, ...
+                            gc.produce_robot(unit.id, bc.UnitType.Ranger)
+                        elif gc.can_produce_robot(unit.id, bc.UnitType.Knight) and military_count()[0] < ratio()[0]:
+                            # knight = 0, ...
+                            gc.produce_robot(unit.id, bc.UnitType.Knight)
+                        elif gc.can_produce_robot(unit.id, bc.UnitType.Mage) and military_count()[2] < ratio()[2]:
+                            # mage = 2, ...
+                            gc.produce_robot(unit.id, bc.UnitType.Mage)
+                        elif gc.can_produce_robot(unit.id, bc.UnitType.Healer) and military_count()[3] < ratio()[3]:
+                            # healer = 3
+                            gc.produce_robot(unit.id, bc.UnitType.Healer)
+
+                    # let's launch a rocket
+                    if unit.unit_type == bc.UnitType.Rocket:
+                        garrison = unit.structure_garrison()
+                        x_roll = random.choice(mars_x_destinations)
+                        y_roll = random.choice(mars_y_destinations)
+                        if (len(garrison) > 5 or (first_rocket and one_worker_loaded)) and \
+                                gc.can_launch_rocket(unit.id, bc.MapLocation(
+                                bc.Planet.Mars, x_roll, y_roll)):
+                            gc.launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll))
+                            first_rocket = False
+                            num_of_rocket_blueprints -= 1
+                            print("launched rocket!")
+                            continue
+                        if gc.round() > 748:
+                            if gc.can_launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll)):
+                                gc.launch_rocket(unit.id, bc.MapLocation(bc.Planet.Mars, x_roll, y_roll))
+
+                    if unit.unit_type == bc.UnitType.Rocket and unit.location.is_on_planet(bc.Planet.Mars):
+                        for d in directions:
+                            if gc.can_unload(unit.id, d):
+                                gc.unload(unit.id, d)
                         continue
 
-                if unit.unit_type == bc.UnitType.Rocket and unit.location.is_on_planet(bc.Planet.Mars):
-                    for d in directions:
-                        if gc.can_unload(unit.id,d):
-                            gc.unload(unit.id,d)
-                    continue
+                except Exception as e:
+                    print('Error:', e)
+                    traceback.print_exc()
 
-            except Exception as e:
-                print('Error:', e)
-                traceback.print_exc()
+                # first, let's look for nearby blueprints to work on
+                location = unit.location
+                if location.is_on_map():
+                    nearby = gc.sense_nearby_units(location.map_location(), 2)
+                    for other in nearby:
+                        if unit.unit_type == bc.UnitType.Worker and gc.can_build(unit.id, other.id):
+                            gc.build(unit.id, other.id)
+                            builder = unit.id
+                            build_location = other.location
+                            building = True
+                            continue
+                            # These next few lines cause my units to explode
+                        # if not one_worker_loaded and other.unit_type == bc.UnitType.Worker:
+                        #     if gc.can_load(other.id, unit.id):
+                        #         gc.load(other.id, unit.id)
+                        #         one_worker_loaded = True
+                        #         print('loaded worker')
+                        # if one_worker_loaded and other.unit_type != bc.UnitType.Worker:
+                        #     if gc.can_load(other.id, unit.id):
+                        #         gc.load(other.id, unit.id)
+                        #         print('loaded military')
+                    if unit.unit_type == bc.UnitType.Rocket:
+                        for other in nearby:
+                            if wom == 0:  # wom = worker on Mars
+                                if gc.can_load(unit.id, other.id) and gc.planet() == bc.Planet.Earth:
+                                    gc.load(unit.id, other.id)
+                            elif other.unit_type != bc.UnitType.Worker:
+                                if gc.can_load(unit.id, other.id) and gc.planet() == bc.Planet.Earth:
+                                    gc.load(unit.id, other.id)
 
-            try:
-                if unit.unit_type == bc.UnitType.Rocket:
-                    pass
-                    # rl = RocketLaunch(unit, unit.location, unit.health)
-            except Exception as e:
-                print('Error:', e)
-                traceback.print_exc()
-
-            try:
-                if unit.unit_type == bc.UnitType.Ranger:
-                    pass
-                    # rr = RangerRetreat(unit, unit.location, unit.health)
-                    # ra = RangerAttack(unit)
-            except Exception as e:
-                print('Error:', e)
-                traceback.print_exc()
-
-            try:
-                if unit.unit_type == bc.UnitType.Knight:
-                    pass
-                    # kr = KnightRetreat(unit, unit.location, unit.health)
-                    # ka = KnightAttack(unit)
-            except Exception as e:
-                print('Error:', e)
-                traceback.print_exc()
-
-            try:
-                if unit.unit_type == bc.UnitType.Mage:
-                    pass
-                    # mr = MageRetreat(unit, unit.location, unit.health)
-                    # ma = MageAttack(unit)
-            except Exception as e:
-                print('Error:', e)
-                traceback.print_exc()
-
-            try:
-                if unit.unit_type == bc.UnitType.Healer:
-                    pass
-                    # hr= HealerRetreat(unit, unit.location, unit.health)
-                    # hf = HealerForward(unit)
-            except Exception as e:
-                print('Error:', e)
-                # use this to show where the error was
-                traceback.print_exc()
-
-            # first, let's look for nearby blueprints to work on
-            location = unit.location
-            if location.is_on_map():
-                nearby = gc.sense_nearby_units(location.map_location(), 2)
-                for other in nearby:
-                    if unit.unit_type == bc.UnitType.Worker and gc.can_build(unit.id, other.id):
-                        gc.build(unit.id, other.id)
-                        builder = unit.id
-                        build_location = other.location
-                        # print('building a factory!')
-                        building = True
-                        # move onto the next unit
+                    if unit.unit_type == bc.UnitType.Worker and can_harvest_adjacent(unit):
+                        harvest_adjacent(unit)
+                        building = True  # so that worker doesn't move away from harvest
                         continue
-                if unit.unit_type == bc.UnitType.Worker and can_harvest_adjacent(unit):
-                    harvest_adjacent(unit)
-                    building = True  # so that worker doesn't move away from harvest
-                    # print("harvested karbonite!")
-                    continue
-                if gc.can_load(other.id, unit.id):
-                    gc.load(other.id, unit.id)
-                    print('loaded unit')
 
+                    if is_robot(unit):
+                        in_attack_range = gc.sense_nearby_units(location.map_location(), unit.attack_range())
+                        if unit.unit_type != bc.UnitType.Healer:
+                            for other in in_attack_range:
+                                if other.team != my_team and gc.is_attack_ready(unit.id) and \
+                                        gc.can_attack(unit.id, other.id):
+                                    gc.attack(unit.id, other.id)
+                                    attacking = True
+                        else:
+                            for other in in_attack_range:
+                                if other.team == my_team and gc.is_heal_ready(unit.id) and \
+                                        gc.can_heal(unit.id, other.id):
+                                    gc.heal(unit.id, other.id)
 
-                if is_robot(unit):
-                    in_attack_range = gc.sense_nearby_units(location.map_location(),unit.attack_range())
-                    if unit.unit_type != bc.UnitType.Healer:
-                        for other in in_attack_range:
-                            if other.team != my_team and gc.is_attack_ready(unit.id) and gc.can_attack(unit.id, other.id):
-                                # print('attacked a thing!')
-                                gc.attack(unit.id, other.id)
+                    # okay, there weren't any dudes around
+                    # pick a random direction:
+                    d = random.choice(directions)
+                    if gc.round() < 600 or gc.planet() == bc.Planet.Mars:
+                        dir_to = location.map_location().direction_to(cu)
+                        dir_away = location.map_location().direction_to(cf)
                     else:
-                        for other in in_attack_range:
-                            if other.team == my_team and gc.is_heal_ready(unit.id) and gc.can_heal(unit.id, other.id):
-                                gc.heal(unit.id, other.id)
-                                # print('Healed unit: %s' % other.unit_type)
+                        dir_to = location.map_location().direction_to(nr)
+                        dir_away = dir_to
+                    dir_to_karbonite = location.map_location().direction_to(nk)
 
-                # okay, there weren't any dudes around
-                # pick a random direction:
-                d = random.choice(directions)
-                dir_to = unit.location.map_location().direction_to(cu)
-                dir_away = unit.location.map_location().direction_to(cf)
+                    # or, try to build a factory:
+                    if can_replicate_any(unit) and workers_total() < 9:
+                        replicate_any(unit)
 
-                # or, try to build a factory:
-                if can_replicate_any(unit) and workers_total() < 9:
-                    replicate_any(unit)
+                    if adjacent_impassable_terrain(location.map_location().add(d)) < 6:
+                        if gc.karbonite() >= bc.UnitType.Factory.blueprint_cost() and gc.can_blueprint(
+                                unit.id, bc.UnitType.Factory, d) and factory_count(num_of_factory_blueprints) < 5:
+                            gc.blueprint(unit.id, bc.UnitType.Factory, d)
+                            num_of_factory_blueprints += 1
+                            building = True
+                            print('blueprint factory')
+                            continue
+                        # let's build a rocket
+                        if gc.karbonite() >= bc.UnitType.Rocket.blueprint_cost() and gc.can_blueprint(
+                                unit.id, bc.UnitType.Rocket, d) and rocket_count(num_of_rocket_blueprints) < 5:
+                            # if (gc.round() < 400 and rocket_count(num_of_rocket_blueprints) < 1) or gc.round() > 399:
+                            gc.blueprint(unit.id, bc.UnitType.Rocket, d)
+                            num_of_rocket_blueprints += 1
+                            building = True
+                            print('blueprint rocket')
+                            continue
+                    # and if that fails, try to move
+    # //////////////////////////////////// military move forward ////////////////////////////////////
+                    if gc.is_move_ready(unit.id) and unit.health > 40 and \
+                            unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer and \
+                            not attacking:
+                        if gc.can_move(unit.id, dir_to):
+                            gc.move_robot(unit.id, dir_to)
+                        elif can_move_any(unit, general_direction(dir_to)):
+                            move_robot_any(unit, general_direction(dir_to))
+                        else:
+                            try:
+                                bug_init[str(unit.id)] = location.map_location().add(dir_to)
+                                go_this_way = util_bug_map(unit)
+                                if gc.can_move(unit.id, go_this_way):
+                                    gc.move_robot(unit.id, go_this_way)
+                            except Exception as e:
+                                print('Error2:', e)
+                                traceback.print_exc()
+    # //////////////////////////////// military retreat /////////////////////////////////////////
+                    if gc.is_move_ready(unit.id) and (unit.health < 41 or attacking) and \
+                            unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
+                        if gc.can_move(unit.id, dir_away):
+                            gc.move_robot(unit.id, dir_away)
+                        elif can_move_any(unit, general_direction(dir_away)):
+                            move_robot_any(unit, general_direction(dir_away))
+                        else:
+                            try:
+                                bug_init[str(unit.id)] = location.map_location().add(dir_away)
+                                go_this_way = util_bug_map(unit)
+                                if gc.can_move(unit.id, go_this_way):
+                                    gc.move_robot(unit.id, go_this_way)
+                            except Exception as e:
+                                print('Error2:', e)
+                                print('Location of Error', location.map_location().add(util_bug_map(unit)))
+                                traceback.print_exc()
+    # /////////////////////////////// healer move /////////////////////////////////////////////
+                    if gc.is_move_ready(unit.id) and \
+                            unit.unit_type != bc.UnitType.Worker and unit.unit_type == bc.UnitType.Healer:
+                        if gc.can_move(unit.id, dir_away):
+                            gc.move_robot(unit.id, dir_away)
+                        elif can_move_any(unit, general_direction(dir_away)):
+                            move_robot_any(unit, general_direction(dir_away))
+                        else:
+                            try:
+                                bug_init[str(unit.id)] = location.map_location().add(dir_away)
+                                go_this_way = util_bug_map(unit)
+                                if gc.can_move(unit.id, go_this_way):
+                                    gc.move_robot(unit.id, go_this_way)
+                            except Exception as e:
+                                print('Error1:', e)
+                                print('Location of Error', location.map_location().add(util_bug_map(unit)))
+                                traceback.print_exc()
+    # //////////////////////////// worker move /////////////////////////////////////////////////////
+                    if gc.is_move_ready(unit.id) and unit.unit_type == bc.UnitType.Worker and \
+                            not building:
+                        if gc.can_move(unit.id, dir_to_karbonite):
+                            gc.move_robot(unit.id, dir_to_karbonite)
+                        elif can_move_any(unit, general_direction(dir_to_karbonite)):
+                            move_robot_any(unit, general_direction(dir_to_karbonite))
+                        else:
+                            try:
+                                bug_init[str(unit.id)] = location.map_location().add(dir_to_karbonite)
+                                go_this_way = util_bug_map(unit)
+                                if gc.can_move(unit.id, go_this_way):
+                                    gc.move_robot(unit.id, go_this_way)
+                            except Exception as e:
+                                print('Error0:', e)
+                                print('Location of Error', location.map_location().add(util_bug_map(unit)))
+                                traceback.print_exc()
+                    building = False
+                    attacking = False
+                    if is_robot(unit):
+                        in_attack_range = gc.sense_nearby_units(location.map_location(), unit.attack_range())
+                        if unit.unit_type != bc.UnitType.Healer:
+                            for other in in_attack_range:
+                                if other.team != my_team and gc.is_attack_ready(unit.id) and \
+                                        gc.can_attack(unit.id, other.id):
+                                    gc.attack(unit.id, other.id)
+                        else:
+                            for other in in_attack_range:
+                                if other.team == my_team and gc.is_heal_ready(unit.id) and \
+                                        gc.can_heal(unit.id, other.id):
+                                    gc.heal(unit.id, other.id)
+        except Exception as e:
+            print('Error total:', e)
+            traceback.print_exc()
 
-                if gc.karbonite() >= bc.UnitType.Factory.blueprint_cost() and gc.can_blueprint(
-                        unit.id, bc.UnitType.Factory, d) and factory_count(num_of_factory_blueprints) < 5:
-                    gc.blueprint(unit.id, bc.UnitType.Factory, d)
-                    # print("building a new factory")
-                    num_of_factory_blueprints += 1
-                    building = True
-                    print('blueprint factory')
-                    continue
-                    # print("%d" % num_of_factory_blueprints)
-                # let's build a rocket
-                if gc.karbonite() >= bc.UnitType.Rocket.blueprint_cost() and gc.can_blueprint(
-                        unit.id, bc.UnitType.Rocket,d) and rocket_count(num_of_rocket_blueprints) < 5:
-                    gc.blueprint(unit.id, bc.UnitType.Rocket, d)
-                    num_of_rocket_blueprints += 1
-                    building = True
-                    print('blueprint rocket')
-                    continue
-                # and if that fails, try to move
-                # if unit is bug moving then bug move
-                if gc.is_move_ready(unit.id) and str(unit.id) in bug_move_dic:
-                    go_this_way = util_bug_map(unit)
-                    if gc.can_move(unit.id, go_this_way):
-                        try:
-                            gc.move_robot(unit.id, go_this_way)
-                        except Exception as e:
-                            print('Bug Error:', e)
-                            print('Location of Error', unit.location.map_location().add(util_bug_map(unit)))
-                            traceback.print_exc()
-                    if location.map_location() in bug_move_dic[str(unit.id)]:  # is unit clear of obstruction
-                        del bug_move_dic[str(unit.id)]
-                        print('bug move done for:', unit.id)
-
-                # impassable terrain ahead, bug move is needed
-                try:
-                    if gc.is_move_ready(unit.id) and gc.starting_map(gc.planet()).on_map(location.map_location().add(dir_to)):
-                        if not gc.starting_map(gc.planet()).is_passable_terrain_at(
-                                location.map_location().add(dir_to)) and \
-                                unit.health > 40 and unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                            bug_move_dic[str(unit.id)] = bug_over_list(location, dir_to)
-                            bug_init[str(unit.id)] = location.map_location().add(dir_to)
-                            go_this_way = util_bug_map(unit)
-                            if gc.can_move(unit.id, go_this_way):
-                                gc.move_robot(unit.id, util_bug_map(unit))
-                            print('military bug move towards')
-                except Exception as e:
-                    print('Error3:', e)
-                    print('Location of Error', unit.location.map_location().add(util_bug_map(unit)))
-                    traceback.print_exc()
-                # military move towards enemies
-                if gc.is_move_ready(unit.id) and gc.can_move(unit.id, dir_to) and unit.health > 40 and \
-                        unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                    gc.move_robot(unit.id, dir_to)
-                    # print('military move towards')
-                if gc.is_move_ready(unit.id) and can_move_any(unit, general_direction(dir_to)) and unit.health > 40\
-                        and unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                    move_robot_any(unit, general_direction(dir_to))
-                    # print('military move towards general')
-                try:
-                    if gc.is_move_ready(unit.id) and gc.starting_map(gc.planet()).on_map(location.map_location().add(dir_away)):
-                        if not gc.starting_map(gc.planet()).is_passable_terrain_at(
-                                location.map_location().add(dir_away)) and \
-                                unit.health < 41 and unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                            bug_move_dic[str(unit.id)] = bug_over_list(location, dir_away)
-                            bug_init[str(unit.id)] = location.map_location().add(dir_away)
-                            go_this_way = util_bug_map(unit)
-                            if gc.can_move(unit.id, go_this_way):
-                                gc.move_robot(unit.id, util_bug_map(unit))
-                            # print('military bug move away')
-                except Exception as e:
-                    print('Error2:', e)
-                    print('Location of Error', unit.location.map_location().add(util_bug_map(unit)))
-                    traceback.print_exc()
-                if gc.is_move_ready(unit.id) and gc.can_move(unit.id, dir_away) and unit.health < 41 and \
-                        unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                    gc.move_robot(unit.id, dir_away)
-                    print('military move away')
-                if gc.is_move_ready(unit.id) and can_move_any(unit, general_direction(dir_away)) and \
-                        unit.health < 41 and unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                    move_robot_any(unit, general_direction(dir_away))
-                    print('military general move away')
-                try:
-                    if gc.is_move_ready(unit.id) and gc.starting_map(gc.planet()).on_map(location.map_location().add(dir_to)):
-                        if not gc.starting_map(gc.planet()).is_passable_terrain_at(
-                                location.map_location().add(dir_away)) and \
-                                unit.unit_type != bc.UnitType.Worker and unit.unit_type != bc.UnitType.Healer:
-                            bug_move_dic[str(unit.id)] = bug_over_list(location, dir_away)
-                            bug_init[str(unit.id)] = location.map_location().add(dir_away)
-                            go_this_way = util_bug_map(unit)
-                            if gc.can_move(unit.id, go_this_way):
-                                gc.move_robot(unit.id, go_this_way)
-                except Exception as e:
-                    print('Error1:', e)
-                    print('Location of Error', unit.location.map_location().add(util_bug_map(unit)))
-                    traceback.print_exc()
-                if gc.is_move_ready(unit.id) and gc.can_move(unit.id, dir_away) and \
-                        unit.unit_type != bc.UnitType.Worker and unit.unit_type == bc.UnitType.Healer:
-                    gc.move_robot(unit.id, dir_away)
-                if gc.is_move_ready(unit.id) and can_move_any(unit, general_direction(dir_away)) and \
-                        unit.unit_type != bc.UnitType.Worker and unit.unit_type == bc.UnitType.Healer:
-                    move_robot_any(unit, general_direction(dir_away))
-                if gc.is_move_ready(unit.id) and gc.can_move(unit.id, d) and not building:
-                    gc.move_robot(unit.id, d)
-                    # print('move worker')
-
-                building = False
-    except Exception as e:
-        print('Error total:', e)
-        print('Location of Error', unit.location.map_location().add(util_bug_map(unit)))
-        traceback.print_exc()
-
-    # send the actions we've performed, and wait for our next turn.
+# send the actions we've performed, and wait for our next turn.
     gc.next_turn()
 
     # these lines are not strictly necessary, but it helps make the logs make more sense.
